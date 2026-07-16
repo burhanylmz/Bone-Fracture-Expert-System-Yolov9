@@ -26,8 +26,6 @@ dataset.yaml
 # --- Weights & Large Models ---
 weights/
 *.pt
-*.pth
-*.onnx
 
 # --- Streamlit Session & Dynamic Runs ---
 .streamlit/
