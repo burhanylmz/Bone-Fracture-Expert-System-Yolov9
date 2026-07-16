@@ -1,0 +1,32 @@
+# --- Python Virtual Environment ---
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# --- IDE settings ---
+.vscode/
+.idea/
+
+# --- OS generated files ---
+.DS_Store
+Thumbs.db
+
+# --- Weights & Large Models (Do NOT push to standard Git) ---
+weights/
+*.pt
+*.pth
+*.onnx
+
+# --- Streamlit Session & Dynamic Runs ---
+.streamlit/
+runs/
+
+# --- Temporary Test Images (Avoid repository bloating) ---
+temp_test_xray.jpg
+doktor_inceleme_tam_ekran.jpg
+doktor_inceleme_odak.jpg

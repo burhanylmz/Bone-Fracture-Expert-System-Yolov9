@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+pydantic
+torch
+torchvision
+ultralytics
+langgraph
+langchain-core
+langchain-openai
+opencv-python
+numpy
+pillow
+python-multipart
+python-dotenv

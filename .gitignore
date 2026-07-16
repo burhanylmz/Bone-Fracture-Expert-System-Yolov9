@@ -1,0 +1,39 @@
+# --- Python Virtual Environment ---
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# --- IDE settings ---
+.vscode/
+.idea/
+
+# --- OS generated files ---
+.DS_Store
+Thumbs.db
+
+# --- Datasets & Training Garbage (REPORA ASLA GİRMEYECEK) ---
+src_training/
+dataset/
+dataset.yaml
+*data.yaml
+*.zip
+
+# --- Weights & Large Models ---
+weights/
+*.pt
+*.pth
+*.onnx
+
+# --- Streamlit Session & Dynamic Runs ---
+.streamlit/
+runs/
+
+# --- Temporary Test Images ---
+temp_test_xray.jpg
+doktor_inceleme_tam_ekran.jpg
+doktor_inceleme_odak.jpg
