@@ -55,9 +55,9 @@ class HybridAttentionAgent(nn.Module):
 
 def generate_explainable_heatmap(img_rgb, bounding_box):
     """
-    [DOKTOR ODAKLI MODÜL]
-    YOLO'nun bulduğu koordinatları alır, otonom olarak yakınlaştırır (Smart Zoom)
-    ve üzerine Dikkat Mekanizmasının odak haritasını (Heatmap) basar.
+    [DOKTOR ODAKLI ÇİFT ÇIKTI MODÜL]
+    1. Tüm resim üzerinde kırık odağına ısı haritası basar.
+    2. Sadece kırık odağını ısı haritasız, temiz bir şekilde yakınlaştırır (Smart Zoom).
     """
     h, w, _ = img_rgb.shape
     xmin, ymin, xmax, ymax = map(int, bounding_box)
@@ -71,33 +71,40 @@ def generate_explainable_heatmap(img_rgb, bounding_box):
     xmax_pad = min(w, xmax + pad_w)
     ymax_pad = min(h, ymax + pad_h)
     
-    # 1. Otonom Akıllı Yakınlaştırma (Smart Crop)
-    cropped_img = img_rgb[ymin_pad:ymax_pad, xmin_pad:xmax_pad].copy()
+    # -------------------------------------------------------------
+    # FOTOĞRAF 1: GENEL RESİM ÜZERİNDE BÖLGESEL ISI HARİTASI
+    # -------------------------------------------------------------
+    full_heatmap = np.zeros((h, w), dtype=np.float32)
+    cx, cy = (xmin + xmax) // 2, (ymin + ymax) // 2
+    # Sadece kırık merkezine dairesel bir odak açıyoruz
+    cv2.circle(full_heatmap, (cx, cy), min(xmax-xmin, ymax-ymin) // 2, 1.0, -1)
+    full_heatmap = cv2.GaussianBlur(full_heatmap, (0, 0), sigmaX=min(xmax-xmin, ymax-ymin)//3)
     
-    # 2. Sahte Dikkat Isı Haritası (Grad-CAM Simülasyonu)
-    # Kırık merkezine odaklanan bir Gauss ısı haritası matrisi oluşturuyoruz
-    crop_h, crop_w, _ = cropped_img.shape
-    heatmap = np.zeros((crop_h, crop_w), dtype=np.float32)
-    
-    # Kırığın yakınlaştırılmış resimdeki yeni merkezini bul
-    cx, cy = (xmin + xmax) // 2 - xmin_pad, (ymin + ymax) // 2 - ymin_pad
-    cv2.circle(heatmap, (cx, cy), min(crop_h, crop_w) // 3, 1.0, -1)
-    heatmap = cv2.GaussianBlur(heatmap, (0, 0), sigmaX=min(crop_h, crop_w)//6)
-    
-    # Isı haritasını renklendir ve orijinal kesit üzerine bindir
-    heatmap = np.uint8(255 * heatmap)
-    color_heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+    full_heatmap = np.uint8(255 * full_heatmap)
+    color_heatmap = cv2.applyColorMap(full_heatmap, cv2.COLORMAP_JET)
     color_heatmap = cv2.cvtColor(color_heatmap, cv2.COLOR_BGR2RGB)
     
-    explainable_output = cv2.addWeighted(cropped_img, 0.6, color_heatmap, 0.4, 0)
+    # Orijinal genel görüntünün üzerine ısı haritasını transparan olarak yediriyoruz
+    explainable_full = cv2.addWeighted(img_rgb, 0.7, color_heatmap, 0.3, 0)
     
-    # Dosya olarak diske yaz (Doktor Paneli İçin)
+    # -------------------------------------------------------------
+    # FOTOĞRAF 2: ISI HARİTASIZ, SADECE NET YAKINLAŞTIRILMIŞ ODAK (SMART CROP)
+    # -------------------------------------------------------------
+    cropped_clean = img_rgb[ymin_pad:ymax_pad, xmin_pad:xmax_pad].copy()
+    
+    # Dosya yollarını çözümlüyoruz
     import os
-    current_file_dir = os.path.dirname(os.path.abspath(__file__)) # app/models
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(current_file_dir, "../.."))
-    output_path = os.path.join(project_root, "doktor_inceleme_odak.jpg")
     
-    cv2.imwrite(output_path, cv2.cvtColor(explainable_output, cv2.COLOR_RGB2BGR))
-    print(f"🟢 [XAI Büyüteç Ajanı] Doktor için yakınlaştırılmış ısı haritası raporu diske kaydedildi: '{output_path}'")
+    output_path_full = os.path.join(project_root, "doktor_inceleme_odak_full.jpg")
+    output_path_crop = os.path.join(project_root, "doktor_inceleme_odak_crop.jpg")
     
-    return output_path
+    # Diske kayıt (OpenCV BGR bekler)
+    cv2.imwrite(output_path_full, cv2.cvtColor(explainable_full, cv2.COLOR_RGB2BGR))
+    cv2.imwrite(output_path_crop, cv2.cvtColor(cropped_clean, cv2.COLOR_RGB2BGR))
+    
+    print(f"🟢 [XAI Büyüteç Ajanı] Genel Isı Haritası: {output_path_full}")
+    print(f"🟢 [XAI Büyüteç Ajanı] Temiz Yakınlaştırılmış Odak: {output_path_crop}")
+    
+    return output_path_full  # Geriye ana referans yolunu dönebilir

@@ -28,6 +28,8 @@ class AgentState(TypedDict, total=False):
     is_valid_xray: bool
     detected_region: str
     detections: List[Dict[str, Any]]
+    box_confidence: float     #  MİMARİ ENTEGRASYON: Model 1'in ham skoru resmi şemaya bağlandı
+    seg_confidence: float     #  MİMARİ ENTEGRASYON: Model 2'nin ham skoru resmi şemaya bağlandı
     ensemble_confidence: float
     is_fracture_present: bool
     preprocessing_status: str
@@ -62,10 +64,9 @@ workflow.add_node("vision", run_vision_agent_pipeline)
 workflow.add_node("report", run_report_agent_pipeline)
 
 # 2. Giriş Noktasının Belirlenmesi
-#  İlk adımda resmin kırpılması ve matrislerin (img_224) üretilmesi şarttır!
 workflow.set_entry_point("preprocessing")
 
-# 3. Standart Geçiş: Ön işleme biter bitmez güvenlik kontrolüne aktarılır
+# 3. Standart Geçiş
 workflow.add_edge("preprocessing", "security")
 
 # 4. Koşullu Geçişin Eklenmesi (Security -> Anatomy VEYA Doğrudan Report)
@@ -85,6 +86,5 @@ workflow.add_edge("report", END)
 #  GRAFİĞİN DERLENMESİ
 compiled_graph = workflow.compile()
 
-# Dosyanın en son mühür kısımları:
 if __name__ == "__main__":
     print("✨ LangGraph İş Akışı Mimarisi başarıyla derlendi ve kullanıma hazır!")
