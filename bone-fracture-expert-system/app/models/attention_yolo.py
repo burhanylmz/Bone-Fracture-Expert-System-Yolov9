@@ -1,11 +1,11 @@
+import os
 import torch
 import torch.nn as nn
 import cv2
 import numpy as np
 
 class ChannelAttention(nn.Module):
-    """ Kanal bazında kritik özellikleri parlatır"""
-    """hibrit dikkat mekanızması kemige odaklanır ve ısı haritası """
+    """Kanal bazında kritik özellikleri parlatır (Hibrit dikkat mekanizması)"""
     def __init__(self, in_planes, ratio=16):
         super(ChannelAttention, self).__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
@@ -40,7 +40,7 @@ class SpatialAttention(nn.Module):
         return self.sigmoid(out)
 
 class HybridAttentionAgent(nn.Module):
-    """ Kanal ve Uzamsal dikkati birleştiren hibrit modül"""
+    """Kanal ve Uzamsal dikkati birleştiren hibrit modül"""
     def __init__(self, c_in):
         super(HybridAttentionAgent, self).__init__()
         self.ca = ChannelAttention(c_in)
@@ -93,7 +93,6 @@ def generate_explainable_heatmap(img_rgb, bounding_box):
     cropped_clean = img_rgb[ymin_pad:ymax_pad, xmin_pad:xmax_pad].copy()
     
     # Dosya yollarını çözümlüyoruz
-    import os
     current_file_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(current_file_dir, "../.."))
     
@@ -107,4 +106,4 @@ def generate_explainable_heatmap(img_rgb, bounding_box):
     print(f"🟢 [XAI Büyüteç Ajanı] Genel Isı Haritası: {output_path_full}")
     print(f"🟢 [XAI Büyüteç Ajanı] Temiz Yakınlaştırılmış Odak: {output_path_crop}")
     
-    return output_path_full  # Geriye ana referans yolunu dönebilir
+    return output_path_full

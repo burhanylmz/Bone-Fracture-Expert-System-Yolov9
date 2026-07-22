@@ -11,6 +11,9 @@ def run_vision_agent_pipeline(state: dict) -> dict:
 
     print("\n--- [Adım 3] Best.pt + U-Net Bölgesel Hassas Segmentasyon Hattı Devreye Girdi ---")
     
+    current_file_dir = os.path.dirname(os.path.abspath(__file__)) 
+    project_root_dir = os.path.abspath(os.path.join(current_file_dir, "../..")) 
+
     # Doktora gösterilecek parlatılmış (CLAHE) canlı resim
     img_for_doctor = state.get("img_640").copy() 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -25,9 +28,6 @@ def run_vision_agent_pipeline(state: dict) -> dict:
         attn_img = attention_segmented_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255.0
         attn_img = np.clip(attn_img, 0, 255).astype(np.uint8)
         img_input_for_yolo = cv2.resize(attn_img, (640, 640))
-
-    current_file_dir = os.path.dirname(os.path.abspath(__file__)) 
-    project_root_dir = os.path.abspath(os.path.join(current_file_dir, "../..")) 
     
     # Sadece kararlı çalışan best.pt modelimizi çağırıyoruz
     box_model_path = os.path.join(project_root_dir, "weights", "best.pt")
@@ -60,7 +60,6 @@ def run_vision_agent_pipeline(state: dict) -> dict:
     if len(box_results.boxes) > 0:
         is_fracture_present = True
         box_conf = float(box_results.boxes[0].conf[0].cpu().numpy())
-        # U-Net rafinasyon skoru bonusu[cite: 2]
         unet_conf = round(min(box_conf + 0.05, 0.98), 4) 
         
         class_id = int(box_results.boxes[0].cls[0].cpu().numpy())
@@ -72,15 +71,14 @@ def run_vision_agent_pipeline(state: dict) -> dict:
         # Görsel 1: Neon Kutu Çizimi
         cv2.rectangle(img_for_box, (x1, y1), (x2, y2), (255, 69, 0), 2)
         
-        # Akıllı Odak Büyüteci Isı Haritası Tetikleme[cite: 2]
+        # Akıllı Odak Büyüteci Isı Haritası Tetikleme
         generate_explainable_heatmap(img_for_doctor, box_results.boxes[0].cpu().numpy().xyxy[0])
         
-# -------------------------------------------------------------
-        # MODEL 2: U-NET BÖLGESEL MİKRO FRAKTÜR İZOLASYONU (Hassaslaştırıldı)
+        # -------------------------------------------------------------
+        # MODEL 2: U-NET BÖLGESEL MİKRO FRAKTÜR İZOLASYONU
         # -------------------------------------------------------------
         mask_overlay = img_for_unet.copy()
         
-        # Kutuyu azıcık genişleterek alıyoruz ki kenar kırıkları kaçmasın
         h_img, w_img = img_for_unet.shape[:2]
         pad = 5
         rx1, ry1 = max(0, x1 - pad), max(0, y1 - pad)
@@ -90,11 +88,9 @@ def run_vision_agent_pipeline(state: dict) -> dict:
         if roi.size > 0:
             gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
             
-            # Kontrastı düşük röntgenler için adaptif eşikleme (Daha hassas çatlak tespiti)
             blurred = cv2.GaussianBlur(gray_roi, (3, 3), 0)
             thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
             
-            # Canny eşiklerini düşürerek mikro çizgileri yakalıyoruz
             edges = cv2.Canny(blurred, 10, 50)
             combined_mask = cv2.bitwise_or(thresh, edges)
             
@@ -103,13 +99,12 @@ def run_vision_agent_pipeline(state: dict) -> dict:
             drawn_count = 0
             for contour in contours:
                 area = cv2.contourArea(contour)
-                if 2 < area < 500: # Aşırı büyük arka planı ve minik gürültüleri ele
+                if 2 < area < 500:
                     contour[:, :, 0] += rx1
                     contour[:, :, 1] += ry1
                     cv2.drawContours(mask_overlay, [contour], -1, (0, 255, 127), 2)
                     drawn_count += 1
             
-            # Eğer adaptif süzgeç kontur bulamadıysa güvenlik ağı olarak kutunun ortasına kırık hattı çizgisi çiz
             if drawn_count == 0:
                 cv2.rectangle(mask_overlay, (x1+3, y1+3), (x2-3, y2-3), (0, 255, 127), 2)
             

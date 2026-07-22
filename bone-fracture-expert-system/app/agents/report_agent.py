@@ -1,20 +1,57 @@
 import os
 import textwrap
+import json
+import re
 from typing import Dict, Any
-from langchain_community.llms import Ollama 
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
 from app.utils.validator import ValidatorAgent
 
+load_dotenv()
+
+def load_prompt_config(agent_name="radiology_report_agent") -> dict:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    prompt_path = os.path.abspath(os.path.join(current_dir, "../utils/prompts.json"))
+    
+    if os.path.exists(prompt_path):
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompts = json.load(f)
+        return prompts.get(agent_name, {})
+    return {}
+
+def get_dynamic_llm_client():
+    provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+    temperature = float(os.getenv("LLM_TEMPERATURE", "0.1"))
+    api_key = os.getenv("LLM_API_KEY", "EMPTY")
+
+    if provider == "vllm":
+        base_url = os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1")
+        model_name = os.getenv("VLLM_MODEL_NAME", "casperhansen/llama-3-8b-instruct-awq")
+        print(f"⚡ [vLLM Engine] Yüksek Başarımlı Sunum Mimarisi Aktif -> {base_url} ({model_name})")
+    elif provider == "openai":
+        base_url = None
+        model_name = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
+        api_key = os.getenv("OPENAI_API_KEY", api_key)
+        print(f"🌐 [OpenAI Cloud Engine] Aktif -> {model_name}")
+    else:
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        model_name = os.getenv("OLLAMA_MODEL_NAME", "llama3")
+        print(f"🦙 [Ollama Engine] Lokal Geliştirme Katmanı Aktif -> {base_url} ({model_name})")
+
+    return ChatOpenAI(
+        model=model_name,
+        openai_api_base=base_url,
+        openai_api_key=api_key,
+        temperature=temperature,
+        max_tokens=500,
+        model_kwargs={"response_format": {"type": "json_object"}}
+    )
+
 def run_report_agent_pipeline(state: dict) -> dict:
-    """
-    LangGraph Düğümü: LLM Tabanlı Otonom Tıbbi Raporlama ve Doğrulama Ajanı.
-    Görsel bulguları lokal LLM (Llama3) mimarisine paslayarak hastaya özel
-    orijinal bir tıbbi rapor üretir.
-    """
     print("\n=========================================")
-    print("🤖 LLM ENTEGRASYONLU RADYOLOJİ RAPOR AJANI TETİKLENDİ")
+    print("🤖 DİNAMİK PROMPT VE ARŞİV DESTEKLİ RAPOR AJANI TETİKLENDİ")
     print("=========================================")
     
-    # 1. Güvenlik Bariyeri Kontrolü
     if state.get("status") == "invalid_input" or not state.get("is_valid_xray", False):
         state["medical_report_html"] = (
             "<div style='color: #D32F2F; background-color: #FFEBEE; padding: 18px; "
@@ -25,7 +62,6 @@ def run_report_agent_pipeline(state: dict) -> dict:
         )
         return state
 
-    # State verilerini çekelim
     is_fracture_present = state.get("is_fracture_present", False)
     ensemble_confidence = state.get("ensemble_confidence", 0.0)
     detections = state.get("detections", [])
@@ -44,7 +80,6 @@ def run_report_agent_pipeline(state: dict) -> dict:
         }
     }
 
-    # 2. ADIM: Kural Tabanlı Klinik Doğrulama (Validator)
     current_file_dir = os.path.dirname(os.path.abspath(__file__))
     rules_path = os.path.abspath(os.path.join(current_file_dir, "../utils/rules.json"))
     
@@ -53,78 +88,53 @@ def run_report_agent_pipeline(state: dict) -> dict:
         validator = ValidatorAgent(rules_path=rules_path)
         validation_res = validator.validate_findings(vision_results)
     except Exception as ev:
-        print(f"⚠️ Validator çalışırken küçük esneklik payı uygulandı: {ev}")
+        print(f"⚠️ Validator çalışırken esneklik uygulandı: {ev}")
     
-    #  Eğer YOLO gerçek bir kırık saptadıysa, Validator'ın ürettiği o uyuşmazlık uyarılarını zorla temizliyoruz!
     if is_fracture_present and len(detections) > 0:
         validation_res["warnings"] = []
         validation_res["validated_status"] = "Passed (Klinik Onay Verildi)"
 
-    # 3. ADIM: LOKAL LLM (OLLAMA - LLAMA3) DEVREYE GİRİYOR
-    print("[LLM] Ollama Llama3 mimarisi üzerinden otonom tıbbi metin jenerasyonu başlatılıyor...")
-    try:
-        llm = Ollama(model="llama3", temperature=0.1)
-        
-        prompt = f"""
-        Sen Sisoft Hastanesi için çalışan profesyonel bir Yapay Zeka Radyoloji Uzmanısın.
-        Aşağıdaki ham verilere dayanarak, resmi, ciddi ve detaylı bir Türkçe radyoloji raporu yazmakla görevlisin.
-        
-        [VERİLER]
-        - İncelenen Kemik Bölgesi: {detected_region}
-        - Kırık Durumu: {"Kırık Hattı Saptandı" if is_fracture_present else "Belirgin Kırık Saptanmadı"}
-        - Yapay Zeka Güven Skoru: %{fracture_prob*100:.2f}
-        - Saptanan Kırık Odağı Sayısı: {len(detections)} adet lezyon hattı
-        - Klinik Doğrulama Durumu: {validation_res.get('validated_status', 'Doğrulandı')}
-
-        [MUTLAK ÇIKTI FORMATI - BU FORMATIN DIŞINA ASLA ÇIKMA]
-        <bulgular>Buraya, incelenen {detected_region} bölgesinin kortikal bütünlüğünü, varsa radyolojik lezyon hatlarını ve bulguları en az 2 detaylı cümle ile medikal dilde yaz.</bulgular>
-        <kanaat>Buraya, saptanan duruma göre yapılması gereken uzman hekim kanaatini, immobilizasyon/alçı gerekliliğini ve sevk adımlarını en az 2 detaylı cümle ile klinik dille yaz.</kanaat>
-
-        [MUTLAK KURALLAR]
-        1. Çıktıda SADECE yukarıda belirtilen <bulgular> ve <kanaat> etiketlerini kullan. 
-        2. Etiketlerin dışına asla 'İşte raporunuz:', 'Not:' veya 'Ben bir yapay zekayım' gibi ekstra cümleler ekleme.
-        3. Metni tamamen Türkçe ve bir başhekim ciddiyetinde kurgula.
-        """
-        
-        llm_output = llm.invoke(prompt)
-        
-    except Exception as e:
-        print(f"⚠️ Lokal LLM Bağlantı Hatası: {str(e)}. Statik yedeğe geçiliyor.")
-        if is_fracture_present:
-            llm_output = f"<bulgular>Yapılan otonom radyolojik incelemede, {detected_region} kemik korteksinde süreklilik kaybı ve akut fraktür hattı saptanmıştır.</bulgular><kanaat>İlgili ekstremitenin acilen atel ile immobilize edilmesi ve ileri cerrahi planlama açısından Ortopedi ve Travmatoloji kliniğine konsülte edilmesi önerilir.</kanaat>"
-        else:
-            llm_output = f"<bulgular>Incelenen {detected_region} kemik yapılarının kortikal kalınlıkları, yoğunlukları ve konturları tabii olarak değerlendirilmiştir. Belirgin bir akut fraktür hattı izlenmemiştir.</bulgular><kanaat>Akut kemik patolojisi düşünülmemekle birlikte, hastanın klinik semptomlarının devamı halinde yumuşak doku zedelenmesi açısından takibi önerilir.</kanaat>"
-
-    # 4. ADIM: LLM Çıktısını Parçalayıp Şık HTML Şablona Giydirmek
-    import re
-    raw_output = llm_output.replace("**", "").replace("*", "").strip()
-    
     bulgular_text = ""
     kanaat_text = ""
-    
-    if "<bulgular>" in llm_output and "</bulgular>" in llm_output:
-        bulgular_text = llm_output.split("<bulgular>")[1].split("</bulgular>")[0].strip()
-    if "<kanaat>" in llm_output and "</kanaat>" in llm_output:
-        kanaat_text = llm_output.split("<kanaat>")[1].split("</kanaat>")[0].strip()
+
+    try:
+        llm = get_dynamic_llm_client()
+        prompt_config = load_prompt_config("radiology_report_agent")
         
-    if not bulgular_text.strip() or not kanaat_text.strip():
-        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', raw_output) if s.strip()]
-        if len(sentences) >= 2:
-            half = len(sentences) // 2
-            bulgular_text = " ".join(sentences[:half])
-            kanaat_text = " ".join(sentences[half:])
-        elif len(sentences) == 1:
-            bulgular_text = sentences[0]
-            
-    if not kanaat_text.strip() or "HEKİM" in kanaat_text:
+        formatted_prompt = prompt_config.get("template", "").format(
+            system_role=prompt_config.get("system_role", ""),
+            instructions=prompt_config.get("instructions", ""),
+            detected_region=detected_region,
+            fracture_status="Kırık Hattı Saptandı" if is_fracture_present else "Belirgin Kırık Saptanmadı",
+            confidence=f"{fracture_prob*100:.2f}",
+            detection_count=len(detections),
+            validation_status=validation_res.get('validated_status', 'Doğrulandı')
+        )
+        
+        response = llm.invoke(formatted_prompt)
+        raw_content = response.content if hasattr(response, 'content') else str(response)
+        
+        parsed_json = json.loads(raw_content)
+        bulgular_text = parsed_json.get("bulgular", "").strip()
+        kanaat_text = parsed_json.get("kanaat", "").strip()
+
+    except Exception as e:
+        print(f"⚠️ LLM Hatası: {str(e)}. Yedeğe geçiliyor.")
         if is_fracture_present:
-            kanaat_text = f"Saptanan akut kırık hattı nedeniyle hastanın etkilenen {detected_region} bölgesinin acilen atel ile immobilize edilmesi ve ileri cerrahi planlama/redüksiyon açısından Ortopedi ve Travmatoloji kliniğine acil sevki uygun görülmüştür."
+            bulgular_text = f"Yapılan otonom radyolojik incelemede, {detected_region} kemik korteksinde süreklilik kaybı ve akut fraktür hattı saptanmıştır."
+            kanaat_text = f"İlgili ekstremitenin acilen atel ile immobilize edilmesi ve ileri cerrahi planlama açısından Ortopedi ve Travmatoloji kliniğine konsülte edilmesi önerilir."
         else:
-            kanaat_text = "Radyolojik olarak akut kemik patolojisi veya fraktür hattı saptanmamıştır. Hastanın konservatif takibi, analjezik tedavisi ve semptomların devamı halinde klinik kontrolü önerilir."
+            bulgular_text = f"İncelenen {detected_region} kemik yapılarının kortikal kalınlıkları, yoğunlukları ve konturları tabii olarak değerlendirilmiştir. Belirgin bir akut fraktür hattı izlenmemiştir."
+            kanaat_text = "Akut kemik patolojisi düşünülmemekle birlikte, hastanın klinik semptomlarının devamı halinde yumuşak doku zedelenmesi açısından takibi önerilir."
 
-    bulgular_text = bulgular_text.replace("BULGULAR:", "").replace("KANAAT:", "").strip()
-    kanaat_text = kanaat_text.replace("BULGULAR:", "").replace("KANAAT:", "").strip()
+    state["report_json"] = {
+        "bulgular": bulgular_text,
+        "kanaat": kanaat_text,
+        "region": detected_region,
+        "is_fracture": is_fracture_present
+    }
 
+    # HTML Çıktı Tasarımı
     badge_color = "#E8F5E9" if not is_fracture_present else "#FFEBEE"
     badge_text_color = "#2E7D32" if not is_fracture_present else "#C62828"
     status_label = "KIRIK SAPTANMADI" if not is_fracture_present else "🚨 ACİL: KIRIK TESPİT EDİLDİ"
@@ -154,7 +164,7 @@ def run_report_agent_pipeline(state: dict) -> dict:
             
             <hr style='border: 0; border-top: 1px dashed #D1D5DB; margin: 12px 0;'>
             
-            <p><b>📍 RADYOLOJİK BULGULAR (Otonom LLM):</b><br>
+            <p><b>📍 RADYOLOJİK BULGULAR:</b><br>
             <span style='color: #374151;'>{bulgular_text}</span></p>
             
             <p><b>👨‍⚕️ UZMAN HEKİM KANAATİ VE ÖNERİ:</b><br>

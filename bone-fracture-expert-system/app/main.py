@@ -6,10 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-# MUTLAK DİZİN BAĞLANTISI (Ajan ağını ve modelleri sorunsuz çağırmak için)
-current_file_dir = os.path.dirname(os.path.abspath(__file__)) # app/ klasörü
+current_file_dir = os.path.dirname(os.path.abspath(__file__))
 agents_dir = os.path.join(current_file_dir, "agents")
-project_root_dir = os.path.abspath(os.path.join(current_file_dir, "..")) # Kök dizin
+project_root_dir = os.path.abspath(os.path.join(current_file_dir, ".."))
 
 if agents_dir not in sys.path: sys.path.insert(0, agents_dir)
 if current_file_dir not in sys.path: sys.path.insert(0, current_file_dir)
@@ -17,13 +16,8 @@ if project_root_dir not in sys.path: sys.path.insert(0, project_root_dir)
 
 from graph import compiled_graph
 
-app = FastAPI(
-    title="Bone Fracture Expert System API",
-    description="FastAPI Backend for Bone Fracture Classification, Detection, Segmentation and Report Generation.",
-    version="1.0.0"
-)
+app = FastAPI(title="Bone Fracture Expert System API", version="1.0.0")
 
-# CORS Middleware configurations (HBYS ve Dış Sistem Entegrasyonu Altyapısı v2)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,20 +31,8 @@ class AnalysisResponse(BaseModel):
     message: str
     details: dict
 
-@app.get("/")
-async def root():
-    return {
-        "app": "Bone Fracture Expert System API",
-        "status": "Running",
-        "version": "1.0.0"
-    }
-
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_xray(file: UploadFile = File(...)):
-    """
-    Upload an X-ray image for analysis (Classification, Detection, Segmentation, Validation & Report Generation)
-    HBYS / PACS Entegrasyonu için Asenkron Servis Katmanı
-    """
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Uploaded file must be an image.")
     
